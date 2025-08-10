@@ -12,6 +12,8 @@ class MultiplayerGarticPhone {
         this.players = [];
         this.currentDrawer = null;
         this.isMyTurn = false;
+        this.peerConnections = new Map();
+        this.mutedPlayers = new Set();
         
         this.init();
     }
@@ -74,6 +76,7 @@ class MultiplayerGarticPhone {
         document.getElementById('clearCanvas').addEventListener('click', () => this.clearCanvas());
         document.getElementById('nextTurn').addEventListener('click', () => this.nextTurn());
         document.getElementById('voiceToggle').addEventListener('click', () => this.toggleVoice());
+        document.getElementById('micTest').addEventListener('click', () => this.testMic());
         document.getElementById('sendMessage').addEventListener('click', () => this.sendMessage());
         document.getElementById('messageInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.sendMessage();
@@ -143,6 +146,155 @@ class MultiplayerGarticPhone {
         this.socket.on('game-error', (data) => {
             this.addSystemMessage(`Error: ${data.message}`);
         });
+
+        // WebRTC signaling
+        this.socket.on('webrtc-offer', async (data) => {
+            console.log('Received offer from:', data.senderId);
+            await this.handleWebRTCOffer(data);
+        });
+
+        this.socket.on('webrtc-answer', async (data) => {
+            console.log('Received answer from:', data.senderId);
+            await this.handleWebRTCAnswer(data);
+        });
+
+        this.socket.on('webrtc-ice-candidate', async (data) => {
+            console.log('Received ICE candidate from:', data.senderId);
+            await this.handleWebRTCIceCandidate(data);
+        });
+    }
+
+    async createPeerConnection(peerId) {
+        const pc = new RTCPeerConnection({
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        });
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                console.log('Sending ICE candidate to:', peerId);
+                this.socket.emit('webrtc-ice-candidate', {
+                    targetId: peerId,
+                    candidate: event.candidate
+                });
+            }
+        };
+
+        pc.ontrack = (event) => {
+            console.log('Received remote stream from:', peerId);
+            this.handleRemoteStream(peerId, event.streams[0]);
+        };
+
+        pc.onconnectionstatechange = () => {
+            console.log(`Connection state with ${peerId}:`, pc.connectionState);
+            const playerName = this.players.find(p => p.id === peerId)?.name || 'Unknown';
+            this.addSystemMessage(`Connection to ${playerName}: ${pc.connectionState}`);
+        };
+
+        this.peerConnections.set(peerId, pc);
+        return pc;
+    }
+
+    async handleWebRTCOffer(data) {
+        try {
+            const pc = await this.createPeerConnection(data.senderId);
+            await pc.setRemoteDescription(data.offer);
+            
+            if (this.audioStream) {
+                this.audioStream.getTracks().forEach(track => {
+                    pc.addTrack(track, this.audioStream);
+                });
+            }
+
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            this.socket.emit('webrtc-answer', {
+                targetId: data.senderId,
+                answer: answer
+            });
+            
+            console.log('Sent answer to:', data.senderId);
+        } catch (error) {
+            console.error('Error handling offer:', error);
+            this.addSystemMessage('❌ Failed to handle voice call');
+        }
+    }
+
+    async handleWebRTCAnswer(data) {
+        try {
+            const pc = this.peerConnections.get(data.senderId);
+            if (pc) {
+                await pc.setRemoteDescription(data.answer);
+                console.log('Set remote description for:', data.senderId);
+            }
+        } catch (error) {
+            console.error('Error handling answer:', error);
+        }
+    }
+
+    async handleWebRTCIceCandidate(data) {
+        try {
+            const pc = this.peerConnections.get(data.senderId);
+            if (pc && pc.remoteDescription) {
+                await pc.addIceCandidate(data.candidate);
+                console.log('Added ICE candidate for:', data.senderId);
+            }
+        } catch (error) {
+            console.error('Error adding ICE candidate:', error);
+        }
+    }
+
+    handleRemoteStream(peerId, stream) {
+        const audioElements = document.getElementById('audioElements');
+        let audio = document.getElementById(`audio-${peerId}`);
+        
+        if (!audio) {
+            audio = document.createElement('audio');
+            audio.id = `audio-${peerId}`;
+            audio.autoplay = true;
+            audio.volume = 1.0;
+            audioElements.appendChild(audio);
+        }
+        
+        audio.srcObject = stream;
+        audio.muted = this.mutedPlayers.has(peerId);
+        
+        const playerName = this.players.find(p => p.id === peerId)?.name || 'Unknown';
+        this.addSystemMessage(`🔊 Connected to ${playerName}'s audio`);
+        
+        // Debug: log when audio starts playing
+        audio.onplaying = () => {
+            this.addSystemMessage(`▶️ Playing audio from ${playerName}`);
+        };
+    }
+
+    async initiateWebRTCCall(peerId) {
+        try {
+            const pc = await this.createPeerConnection(peerId);
+            
+            if (this.audioStream) {
+                this.audioStream.getTracks().forEach(track => {
+                    pc.addTrack(track, this.audioStream);
+                });
+            }
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            this.socket.emit('webrtc-offer', {
+                targetId: peerId,
+                offer: offer
+            });
+            
+            const playerName = this.players.find(p => p.id === peerId)?.name || 'Unknown';
+            this.addSystemMessage(`📞 Calling ${playerName}...`);
+        } catch (error) {
+            console.error('WebRTC call error:', error);
+            this.addSystemMessage('❌ Failed to initiate voice call');
+        }
     }
 
     joinGame() {
@@ -183,21 +335,53 @@ class MultiplayerGarticPhone {
         
         this.players.forEach(player => {
             const playerDiv = document.createElement('div');
-            playerDiv.className = 'player online';
+            playerDiv.className = 'player-controls';
             playerDiv.id = `player-${player.id}`;
             
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'player-name';
             let displayName = player.name;
             if (player.id === this.socket.id) displayName += ' (You)';
             if (this.currentDrawer && player.id === this.currentDrawer.id) {
                 displayName += ' 🎨';
                 playerDiv.classList.add('drawing');
             }
+            nameSpan.textContent = displayName;
             
-            playerDiv.textContent = displayName;
+            playerDiv.appendChild(nameSpan);
+            
+            // Add mute button for other players
+            if (player.id !== this.socket.id) {
+                const muteBtn = document.createElement('button');
+                muteBtn.className = 'mute-btn';
+                muteBtn.textContent = this.mutedPlayers.has(player.id) ? 'Unmute' : 'Mute';
+                if (this.mutedPlayers.has(player.id)) muteBtn.classList.add('muted');
+                
+                muteBtn.addEventListener('click', () => this.toggleMute(player.id));
+                playerDiv.appendChild(muteBtn);
+            }
+            
             playersList.appendChild(playerDiv);
         });
         
         this.updateRoomInfo();
+    }
+
+    toggleMute(playerId) {
+        const audio = document.getElementById(`audio-${playerId}`);
+        const muteBtn = document.querySelector(`#player-${playerId} .mute-btn`);
+        
+        if (this.mutedPlayers.has(playerId)) {
+            this.mutedPlayers.delete(playerId);
+            if (audio) audio.muted = false;
+            muteBtn.textContent = 'Mute';
+            muteBtn.classList.remove('muted');
+        } else {
+            this.mutedPlayers.add(playerId);
+            if (audio) audio.muted = true;
+            muteBtn.textContent = 'Unmute';
+            muteBtn.classList.add('muted');
+        }
     }
 
     updateGameState(prompt, round) {
@@ -304,31 +488,42 @@ class MultiplayerGarticPhone {
         if (!this.voiceActive) {
             try {
                 this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                this.mediaRecorder = new MediaRecorder(this.audioStream);
-                
-                this.mediaRecorder.start();
                 this.voiceActive = true;
                 button.textContent = '🎤 Voice On';
                 button.classList.add('voice-active');
                 
                 this.socket.emit('voice-state', { isActive: true });
+                this.addSystemMessage('Voice enabled - connecting to other players...');
+                
+                // Wait a bit then initiate WebRTC calls with all other players
+                setTimeout(() => {
+                    this.players.forEach(player => {
+                        if (player.id !== this.socket.id) {
+                            this.addSystemMessage(`Connecting to ${player.name}...`);
+                            this.initiateWebRTCCall(player.id);
+                        }
+                    });
+                }, 500);
                 
             } catch (error) {
                 this.addSystemMessage('Could not access microphone. Please check permissions.');
+                console.error('Microphone error:', error);
             }
         } else {
-            if (this.mediaRecorder) {
-                this.mediaRecorder.stop();
-            }
             if (this.audioStream) {
                 this.audioStream.getTracks().forEach(track => track.stop());
             }
+            
+            // Close all peer connections
+            this.peerConnections.forEach(pc => pc.close());
+            this.peerConnections.clear();
             
             this.voiceActive = false;
             button.textContent = '🎤 Voice Off';
             button.classList.remove('voice-active');
             
             this.socket.emit('voice-state', { isActive: false });
+            this.addSystemMessage('Voice disabled.');
         }
     }
 
@@ -377,6 +572,32 @@ class MultiplayerGarticPhone {
         }
     }
 
+    async testMic() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const audioContext = new AudioContext();
+            const source = audioContext.createMediaStreamSource(stream);
+            const destination = audioContext.createMediaStreamDestination();
+            source.connect(destination);
+            
+            const audio = new Audio();
+            audio.srcObject = destination.stream;
+            audio.play();
+            
+            this.addSystemMessage('🎧 Mic test - you should hear yourself for 3 seconds');
+            
+            setTimeout(() => {
+                audio.pause();
+                stream.getTracks().forEach(track => track.stop());
+                audioContext.close();
+                this.addSystemMessage('🎧 Mic test ended');
+            }, 3000);
+        } catch (error) {
+            this.addSystemMessage('❌ Mic test failed - check permissions');
+            console.error('Mic test error:', error);
+        }
+    }
+
     addSystemMessage(message) {
         const chatMessages = document.getElementById('chatMessages');
         const messageDiv = document.createElement('div');
@@ -384,6 +605,7 @@ class MultiplayerGarticPhone {
         messageDiv.textContent = `🎮 ${message}`;
         chatMessages.appendChild(messageDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
+        console.log('System:', message);
     }
 }
 

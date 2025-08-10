@@ -233,6 +233,27 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('webrtc-offer', (data) => {
+        socket.to(data.targetId).emit('webrtc-offer', {
+            offer: data.offer,
+            senderId: socket.id
+        });
+    });
+
+    socket.on('webrtc-answer', (data) => {
+        socket.to(data.targetId).emit('webrtc-answer', {
+            answer: data.answer,
+            senderId: socket.id
+        });
+    });
+
+    socket.on('webrtc-ice-candidate', (data) => {
+        socket.to(data.targetId).emit('webrtc-ice-candidate', {
+            candidate: data.candidate,
+            senderId: socket.id
+        });
+    });
+
     socket.on('disconnect', () => {
         const player = players.get(socket.id);
         if (player) {
