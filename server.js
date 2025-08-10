@@ -41,11 +41,13 @@ class GameRoom {
     }
 
     startGame() {
-        if (this.players.length < 2) return false;
+        console.log(`Attempting to start game with ${this.players.length} players`);
+        if (this.players.length < 1) return false; // Allow single player for testing
         this.gameState = 'drawing';
         this.currentPrompt = this.prompts[Math.floor(Math.random() * this.prompts.length)];
         this.currentDrawerIndex = 0;
         this.correctGuesses.clear();
+        console.log(`Game started with prompt: ${this.currentPrompt}`);
         return true;
     }
 
@@ -103,16 +105,33 @@ io.on('connection', (socket) => {
 
     socket.on('start-game', () => {
         const player = players.get(socket.id);
-        if (!player) return;
+        if (!player) {
+            console.log('Player not found for start-game');
+            return;
+        }
         
         const room = rooms.get(player.room);
-        if (room && room.startGame()) {
+        if (!room) {
+            console.log('Room not found for start-game');
+            return;
+        }
+        
+        console.log(`Starting game in room ${player.room} with ${room.players.length} players`);
+        
+        if (room.startGame()) {
             const currentDrawer = room.getCurrentDrawer();
+            console.log(`Game started, current drawer: ${currentDrawer ? currentDrawer.name : 'none'}`);
+            
             io.to(player.room).emit('game-started', {
                 prompt: room.currentPrompt,
                 gameState: room.gameState,
                 currentDrawer: currentDrawer,
                 round: room.currentRound + 1
+            });
+        } else {
+            console.log('Failed to start game - not enough players');
+            socket.emit('game-error', {
+                message: 'Need at least 2 players to start the game'
             });
         }
     });

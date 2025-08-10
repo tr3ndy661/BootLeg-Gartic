@@ -112,14 +112,14 @@ class MultiplayerGarticPhone {
 
         this.socket.on('game-started', (data) => {
             this.currentDrawer = data.currentDrawer;
-            this.isMyTurn = this.currentDrawer.id === this.socket.id;
+            this.isMyTurn = this.currentDrawer && this.currentDrawer.id === this.socket.id;
             this.updateGameState(data.prompt, data.round);
             this.clearCanvas();
         });
 
         this.socket.on('turn-changed', (data) => {
             this.currentDrawer = data.currentDrawer;
-            this.isMyTurn = this.currentDrawer.id === this.socket.id;
+            this.isMyTurn = this.currentDrawer && this.currentDrawer.id === this.socket.id;
             this.updateGameState(data.prompt, data.round);
             this.clearCanvas();
         });
@@ -138,6 +138,10 @@ class MultiplayerGarticPhone {
 
         this.socket.on('player-voice-state', (data) => {
             this.updatePlayerVoiceState(data.playerId, data.isActive);
+        });
+
+        this.socket.on('game-error', (data) => {
+            this.addSystemMessage(`Error: ${data.message}`);
         });
     }
 
@@ -204,7 +208,7 @@ class MultiplayerGarticPhone {
             document.getElementById('nextTurn').style.display = 'inline-block';
             this.enableDrawing();
             this.addSystemMessage(`Your turn! Draw: "${prompt}"`);
-        } else {
+        } else if (this.currentDrawer) {
             document.getElementById('promptTitle').textContent = `${this.currentDrawer.name} is drawing`;
             document.getElementById('drawingPrompt').textContent = 'Guess what they\'re drawing!';
             document.getElementById('gameStatus').textContent = 'Type your guess in the chat below.';
