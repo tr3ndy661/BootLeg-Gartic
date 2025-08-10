@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gartic Phone Clone</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="loginScreen" class="login-screen">
+        <div class="login-form">
+            <h1>🎨 Gartic Phone</h1>
+            <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+            <input type="text" id="roomId" placeholder="Room ID (optional)" maxlength="10">
+            <button id="joinGame">Join Game</button>
+        </div>
+    </div>
+
+    <div id="gameScreen" class="container" style="display: none;">
+        <header>
+            <h1>🎨 Gartic Phone</h1>
+            <div class="room-info">
+                <span id="roomIdDisplay">Room: </span>
+                <span id="playerCount">Players: 0</span>
+            </div>
+            <div class="controls">
+                <button id="startGame">Start Game</button>
+                <button id="voiceToggle">🎤 Voice Off</button>
+            </div>
+        </header>
+
+        <main>
+            <div class="game-area">
+                <div class="drawing-section">
+                    <div class="prompt-area">
+                        <h3 id="promptTitle">Waiting for game to start...</h3>
+                        <p id="drawingPrompt">Click "Start Game" to begin!</p>
+                        <p id="gameStatus"></p>
+                        <button id="nextTurn" style="display: none;">Next Turn</button>
+                    </div>
+                    
+                    <div class="canvas-container">
+                        <canvas id="drawingCanvas" width="600" height="400"></canvas>
+                        <div class="tools">
+                            <input type="color" id="colorPicker" value="#000000">
+                            <input type="range" id="brushSize" min="1" max="20" value="3">
+                            <button id="clearCanvas">Clear</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sidebar">
+                    <div class="chat-section">
+                        <h3>💬 Chat</h3>
+                        <div id="chatMessages"></div>
+                        <div class="chat-input">
+                            <input type="text" id="messageInput" placeholder="Type a message...">
+                            <button id="sendMessage">Send</button>
+                        </div>
+                    </div>
+
+                    <div class="players-section">
+                        <h3>👥 Players</h3>
+                        <div id="playersList"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
